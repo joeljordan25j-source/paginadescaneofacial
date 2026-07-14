@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HQ - Central de Monitoreo en Vivo (Segura)</title>
     
-    <!-- Leaflet CSS para el Mapa -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
@@ -94,6 +93,7 @@
         }
         select:focus { border-color: var(--azul-boton); }
 
+        /* Estilo para las opciones del selector */
         option.desconectada { color: #94a3b8; text-decoration: line-through; }
         option.activa { color: #0f172a; font-weight: 500; }
 
@@ -122,7 +122,6 @@
 </head>
 <body>
 
-    <!-- PANTALLA DE BLOQUEO / LOGIN -->
     <div id="loginOverlay">
         <div class="login-card">
             <div class="login-logo">🛡️</div>
@@ -130,8 +129,7 @@
             <p style="font-size: 12px; color: #64748b; margin-top: 4px;">Identifícate para entrar a la Central en vivo</p>
             
             <form onsubmit="validarLogin(event)">
-                <!-- Agregado autocapitalize="none" para evitar correcciones -->
-                <input type="text" id="userInput" class="login-input" placeholder="Usuario (ej. admin)" required autocomplete="off" autocapitalize="none">
+                <input type="text" id="userInput" class="login-input" placeholder="Usuario (ej. admin)" required autocomplete="off">
                 <input type="password" id="passInput" class="login-input" placeholder="Contraseña" required>
                 
                 <button type="submit" class="btn-login">⚡ Desbloquear Sistema</button>
@@ -144,7 +142,6 @@
         </div>
     </div>
 
-    <!-- CONTENIDO DE LA CENTRAL DE MONITOREO -->
     <header>
         <div class="header-left">
             <div class="header-logo">🔥</div>
@@ -170,6 +167,7 @@
                     <option value="">⏳ Cargando desde tu Firebase...</option>
                 </select>
             </div>
+            
             <div id="statusConsulta" style="font-size: 12px; color: var(--texto-secundario); margin-top: 15px; line-height: 1.4; word-break: break-word;">
                 Selecciona un curso/cámara para sincronizar en tiempo real.
             </div>
@@ -190,12 +188,14 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
 
     <script>
+        // --- 1. LÓGICA DE LOGIN Y HASH SHA-256 ---
         const USUARIO_AUTORIZADO = "admin";
-        const HASH_CLAVE_AUTORIZADA = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9";
+        const HASH_CLAVE_AUTORIZADA = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"; // admin123
 
         async function generarHashSHA256(texto) {
             const encoder = new TextEncoder();
@@ -207,8 +207,7 @@
 
         async function validarLogin(event) {
             event.preventDefault();
-            // .toLowerCase() convierte todo a minúsculas
-            const usuario = document.getElementById('userInput').value.trim().toLowerCase();
+            const usuario = document.getElementById('userInput').value.trim();
             const clave = document.getElementById('passInput').value;
             const errorDiv = document.getElementById('errorLogin');
             const hashDisplay = document.getElementById('hashDisplay');
@@ -242,9 +241,20 @@
 
         function cerrarSesion() {
             sessionStorage.removeItem("sesionActiva");
-            window.location.reload(); 
+            const overlay = document.getElementById('loginOverlay');
+            overlay.style.visibility = "visible";
+            overlay.style.opacity = "1";
+            overlay.style.display = "flex";
+            document.getElementById('passInput').value = "";
+            document.getElementById('errorLogin').style.display = "none";
+            document.getElementById('hashDisplay').style.display = "none";
+            
+            if (observadorCamara) observadorCamara();
+            if (observadorRegistro) observadorRegistro();
+            if (observadorLista) observadorLista();
         }
 
+        // --- 2. CONFIGURACIÓN DE FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyBtX7uKiGBcJKANRZ4KLW3Tvge2NgDsmoU",
             authDomain: "motor-c7e0d.firebaseapp.com",
@@ -261,16 +271,23 @@
         const mapa = L.map('mapa').setView([-2.128589, -79.931099], 18);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(mapa);
         
+        // --- 3. ICONOS PERSONALIZADOS PARA EL MAPA ---
         const iconoPrendida = new L.Icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
         });
 
         const iconoApagada = new L.Icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
         });
 
         let marcadorActual = null;
@@ -280,6 +297,7 @@
         let datosCamaraActual = null;
         let datosRegistroActual = null;
 
+        // --- FUNCIÓN HELPER PARA SACAR NOMBRE LIMPIO Y EVITAR EL [object Object] ---
         function obtenerNombreEstudiante(est) {
             if (typeof est === 'object' && est !== null) {
                 return est.nombre || est.name || est.alumno || est.id || JSON.stringify(est);
@@ -290,100 +308,299 @@
         function iniciarObservadorListaCamaras() {
             const selForma = document.getElementById('selForma');
             const statusDiv = document.getElementById('statusConsulta');
+
             if (observadorLista) observadorLista();
 
             observadorLista = db.collection("SesionesCamara").onSnapshot((querySnapshot) => {
                 const valorSeleccionado = selForma.value;
                 selForma.innerHTML = '<option value="">-- Selecciona una cámara --</option>';
+                
+                if (querySnapshot.empty) {
+                    selForma.innerHTML = '<option value="">⚠️ No hay documentos en SesionesCamara</option>';
+                    return;
+                }
+
                 querySnapshot.forEach((doc) => {
                     const data = doc.data();
                     const idDoc = doc.id;
-                    const nombreCamara = data.camara_nombre || idDoc;
-                    const estaDesconectada = data.activo === false || String(data.estado).toLowerCase() === "desconectada";
+                    
+                    const estaDesconectada = 
+                        data.activo === false || 
+                        String(data.activo).toLowerCase() === "false" || 
+                        String(data.estado).toLowerCase() === "desconectada" || 
+                        String(data.estado).toLowerCase() === "inactiva" || 
+                        String(data.estado).toLowerCase() === "apagada" ||
+                        String(data.status).toLowerCase() === "offline";
+                    
                     const option = document.createElement("option");
                     option.value = idDoc;
+                    
                     if (estaDesconectada) {
-                        option.textContent = `🔴 ✖ ${nombreCamara} (DESACTIVADA)`;
+                        option.textContent = `🔴 ✖ ${idDoc} (DESACTIVADA)`;
                         option.className = "desconectada";
+                        option.style.textDecoration = "line-through";
+                        option.style.color = "#94a3b8";
                     } else {
-                        option.textContent = `🟢 ${nombreCamara} (${idDoc})`;
+                        option.textContent = `🟢 ${idDoc}`;
                         option.className = "activa";
                     }
+
                     selForma.appendChild(option);
                 });
-                if (valorSeleccionado) selForma.value = valorSeleccionado;
+
+                if (valorSeleccionado) {
+                    selForma.value = valorSeleccionado;
+                }
+
+                statusDiv.innerHTML = `✔ <b>${querySnapshot.size}</b> cámaras cargadas en tiempo real.`;
+            }, (error) => {
+                console.error("Error al cargar lista en vivo:", error);
+                statusDiv.innerHTML = `<span style="color:red;">❌ Error al cargar listado: ${error.message}</span>`;
             });
         }
 
         function consultarFirebase() {
             const idCamara = document.getElementById('selForma').value;
-            if (!idCamara) return;
+            const statusDiv = document.getElementById('statusConsulta');
+            const mensajeVacio = document.getElementById('mensajeVacio');
+
+            if (!idCamara) {
+                alert("¡Pilas! Primero selecciona una cámara del listado.");
+                return;
+            }
+
             if (observadorCamara) observadorCamara();
             if (observadorRegistro) observadorRegistro();
 
+            if (mensajeVacio) mensajeVacio.style.display = 'none';
+            statusDiv.innerHTML = `📡 Conectando radares a <b>${idCamara}</b>...`;
+
+            datosCamaraActual = null;
+            datosRegistroActual = null;
+
             observadorCamara = db.collection("SesionesCamara").doc(idCamara).onSnapshot((docCamara) => {
+                if (!docCamara.exists) {
+                    statusDiv.innerHTML = `<span style="color:red;">❌ El documento de la cámara no existe.</span>`;
+                    return;
+                }
                 datosCamaraActual = docCamara.data();
                 actualizarPantalla(idCamara);
+            }, (error) => {
+                console.error("Error en Snapshot Cámara:", error);
+                statusDiv.innerHTML = `<span style="color:red;">❌ Error de Cámara: ${error.message}</span>`;
             });
 
             observadorRegistro = db.collection("SesionesCamara").doc(idCamara).collection("RegistroDiario")
-                .orderBy(firebase.firestore.FieldPath.documentId(), "desc").limit(1)
+                .orderBy(firebase.firestore.FieldPath.documentId(), "desc")
+                .limit(1)
                 .onSnapshot((querySnapshot) => {
-                    datosRegistroActual = !querySnapshot.empty ? { id: querySnapshot.docs[0].id, data: querySnapshot.docs[0].data() } : null;
+                    if (!querySnapshot.empty) {
+                        datosRegistroActual = {
+                            id: querySnapshot.docs[0].id,
+                            data: querySnapshot.docs[0].data()
+                        };
+                    } else {
+                        datosRegistroActual = null;
+                    }
                     actualizarPantalla(idCamara);
+                }, (error) => {
+                    console.error("Error en Snapshot Registro:", error);
+                    statusDiv.innerHTML = `<span style="color:red;">❌ Error de Asistencia: ${error.message}</span>`;
                 });
         }
 
         function actualizarPantalla(idCamara) {
+            const statusDiv = document.getElementById('statusConsulta');
+            const contenedorLogs = document.getElementById('contenedorLogs');
+
             if (!datosCamaraActual) return;
+
             const dataCamara = datosCamaraActual;
-            const nombreCamara = dataCamara.camara_nombre || idCamara;
-            const estaDesconectada = dataCamara.activo === false || String(dataCamara.estado).toLowerCase() === "desconectada";
-            
-            let lat = dataCamara.ubicacion?.latitude || -2.128589, lng = dataCamara.ubicacion?.longitude || -79.931099;
-            
-            let htmlList = "";
-            let totalInfiltrados = 0, totalNoRegistrados = 0;
-            let presentes = 0, ausentes = 0;
+            let nombreCamara = dataCamara.camara_nombre || idCamara;
+            const cursoAsignado = dataCamara.curso_assigned || idCamara;
 
-            if (datosRegistroActual) {
-                const rData = datosRegistroActual.data;
-                presentes = rData.total_presentes || 0;
-                ausentes = rData.total_ausentes || 0;
+            // --- ESTA ES LA MAGIA: Si el nombre de la BD es "Camara Desconocida", lo cambiamos forzadamente por el nombre del curso ---
+            if (nombreCamara.trim().toLowerCase() === "camara desconocida" || nombreCamara.trim().toLowerCase() === "cámara desconocida") {
+                nombreCamara = idCamara;
+            }
 
-                if (rData.lista_presentes) rData.lista_presentes.forEach(est => htmlList += `<div class="student-item"><span>👤 ${obtenerNombreEstudiante(est)}</span><span class="badge ok">Presente</span></div>`);
-                if (rData.lista_ausentes) rData.lista_ausentes.forEach(est => htmlList += `<div class="student-item"><span>👤 ${obtenerNombreEstudiante(est)}</span><span class="badge morado">Ausente</span></div>`);
-                
-                if (rData.lista_intrusos) {
-                    rData.lista_intrusos.forEach(est => {
-                        let nombre = obtenerNombreEstudiante(est);
-                        let esRegistrado = !(est.registrado === false || est.estado === "no_registrado" || nombre.toLowerCase().includes("desconocido") || nombre.toLowerCase().includes("object"));
-                        if (esRegistrado) totalInfiltrados++; else totalNoRegistrados++;
-                        htmlList += `<div class="student-item" style="border-color: ${esRegistrado ? '#fca5a5' : '#fde68a'};"><span style="color: ${esRegistrado ? '#dc2626' : '#d97706'}; font-weight: bold;">${esRegistrado ? '🚨' : '❓'} ${nombre}</span><span class="${esRegistrado ? 'badge alerta' : 'badge amarillo'}">${esRegistrado ? 'INFILTRADO' : 'NO REGISTRADO'}</span></div>`;
-                    });
+            const estaDesconectada = 
+                dataCamara.activo === false || 
+                String(dataCamara.activo).toLowerCase() === "false" || 
+                String(dataCamara.estado).toLowerCase() === "desconectada" || 
+                String(dataCamara.estado).toLowerCase() === "inactiva" || 
+                String(dataCamara.estado).toLowerCase() === "apagada" ||
+                String(dataCamara.status).toLowerCase() === "offline";
+
+            let lat = -2.128589, lng = -79.931099;
+            if (dataCamara.ubicacion) {
+                if (typeof dataCamara.ubicacion.latitude === 'number') {
+                    lat = dataCamara.ubicacion.latitude;
+                    lng = dataCamara.ubicacion.longitude;
+                } else if (Array.isArray(dataCamara.ubicacion) && dataCamara.ubicacion.length >= 2) {
+                    lat = Number(dataCamara.ubicacion[0]) || lat;
+                    lng = Number(dataCamara.ubicacion[1]) || lng;
                 }
             }
 
-            document.getElementById('contenedorLogs').innerHTML = `
-                <div class="log-item">
-                    <div class="log-header" style="${estaDesconectada ? 'background: #f1f5f9;' : ''}">
+            let idRegistro = "N/A";
+            let presentes = 0, ausentes = 0;
+            let totalInfiltrados = 0, totalNoRegistrados = 0;
+            let listaEstudiantesHTML = `<div style="font-size: 11px; color: #64748b; margin-top: 4px;">Sin registros generados hoy.</div>`;
+            let cursoRegistro = cursoAsignado;
+
+            if (datosRegistroActual) {
+                idRegistro = datosRegistroActual.id;
+                const rData = datosRegistroActual.data;
+                presentes = rData.total_presentes || 0;
+                ausentes = rData.total_ausentes || 0;
+                cursoRegistro = rData.curso_assigned_camara || cursoAsignado;
+                
+                // Empezamos contando los desconocidos que envíe la base de datos
+                totalNoRegistrados = rData.total_desconocidos || 0;
+
+                let tempHTML = "";
+                if (rData.lista_presentes && Array.isArray(rData.lista_presentes)) {
+                    rData.lista_presentes.forEach(est => {
+                        const nombre = obtenerNombreEstudiante(est);
+                        tempHTML += `<div class="student-item"><span>👤 ${nombre}</span><span class="badge ok">Presente</span></div>`;
+                    });
+                }
+                if (rData.lista_ausentes && Array.isArray(rData.lista_ausentes)) {
+                    rData.lista_ausentes.forEach(est => {
+                        const nombre = obtenerNombreEstudiante(est);
+                        tempHTML += `<div class="student-item"><span style="color: #64748b;">👤 ${nombre}</span><span class="badge morado">Ausente</span></div>`;
+                    });
+                }
+                
+                // --- LÓGICA INTELIGENTE PARA INFILTRADOS VS NO REGISTRADOS ---
+                if (rData.lista_intrusos && Array.isArray(rData.lista_intrusos)) {
+                    rData.lista_intrusos.forEach(est => {
+                        let nombre = "";
+                        let esRegistrado = true;
+
+                        if (typeof est === 'object' && est !== null) {
+                            nombre = est.nombre || est.name || est.alumno || est.id || "";
+                            // Evaluamos si el objeto dice explícitamente que no está registrado
+                            if (est.registrado === false || est.registered === false || est.en_firebase === false || est.tipo === "desconocido" || est.estado === "no_registrado") {
+                                esRegistrado = false;
+                            }
+                        } else {
+                            nombre = String(est);
+                        }
+
+                        // Verificamos por el texto si es alguien sin registro / desconocido
+                        const nombreLower = nombre.toLowerCase().trim();
+                        if (!nombre || nombreLower === "desconocido" || nombreLower === "unknown" || nombreLower === "no registrado" || nombreLower === "n/a" || nombreLower.includes("desconocido") || nombreLower.includes("object")) {
+                            esRegistrado = false;
+                            if (!nombre || nombreLower === "desconocido" || nombreLower === "unknown" || nombreLower.includes("object")) {
+                                nombre = est.id || "Rostro No Reconocido";
+                            }
+                        }
+
+                        // Llevamos el conteo exacto para el panel
+                        if (esRegistrado) {
+                            totalInfiltrados++;
+                        } else {
+                            totalNoRegistrados++;
+                        }
+
+                        const badgeTexto = esRegistrado ? "INFILTRADO" : "NO REGISTRADO";
+                        const badgeEstilo = esRegistrado ? "badge alerta" : "badge amarillo";
+                        const icono = esRegistrado ? "🚨" : "❓";
+
+                        tempHTML += `<div class="student-item" style="border-color: ${esRegistrado ? '#fca5a5' : '#fde68a'};"><span style="color: ${esRegistrado ? '#dc2626' : '#d97706'}; font-weight: bold;">${icono} ${nombre}</span><span class="${badgeEstilo}">${badgeTexto}</span></div>`;
+                    });
+                }
+                if (tempHTML) listaEstudiantesHTML = tempHTML;
+            }
+
+            let badgeClass = "badge ok";
+            let badgeText = "TODO EN ORDEN";
+            let bgHeader = "";
+            let colorTitulo = "";
+
+            if (estaDesconectada) {
+                statusDiv.innerHTML = `🔴 <b>DESACTIVADA:</b> La cámara <b>${nombreCamara}</b> se encuentra fuera de línea.`;
+                badgeClass = "badge offline";
+                badgeText = "DESACTIVADA";
+                bgHeader = "background: #f1f5f9;";
+                colorTitulo = "color: #94a3b8; text-decoration: line-through;";
+            } else {
+                if (datosRegistroActual) {
+                    statusDiv.innerHTML = `🟢 <b>EN VIVO:</b> Sincronizado con <b>${nombreCamara}</b> (Captura: ${idRegistro})`;
+                    if (totalInfiltrados > 0 && totalNoRegistrados > 0) {
+                        badgeClass = "badge alerta";
+                        badgeText = `${totalInfiltrados} INFILTRADO(S) / ${totalNoRegistrados} NO REG.`;
+                        bgHeader = "background: #fef2f2;";
+                        colorTitulo = "color: #dc2626;";
+                    } else if (totalInfiltrados > 0) {
+                        badgeClass = "badge alerta";
+                        badgeText = `${totalInfiltrados} INFILTRADO(S)`;
+                        bgHeader = "background: #fef2f2;";
+                        colorTitulo = "color: #dc2626;";
+                    } else if (totalNoRegistrados > 0) {
+                        badgeClass = "badge amarillo";
+                        badgeText = `${totalNoRegistrados} NO REGISTRADO(S)`;
+                    } else if (ausentes > 0) {
+                        badgeClass = "badge morado";
+                        badgeText = `${ausentes} AUSENTE(S)`;
+                    }
+                } else {
+                    statusDiv.innerHTML = `🟢 <b>EN VIVO:</b> Conectado a <b>${nombreCamara}</b> (Esperando capturas...)`;
+                    badgeClass = "badge amarillo";
+                    badgeText = "ACTIVA SIN REGISTROS";
+                }
+            }
+
+            const contenidoTarjeta = `
+                <div class="log-header" style="${bgHeader}">
+                    <div style="font-weight: 600; ${colorTitulo}">
                         <span>📷 ${nombreCamara}</span>
-                        <span class="${estaDesconectada ? 'badge offline' : 'badge ok'}">${estaDesconectada ? 'DESACTIVADA' : 'EN VIVO'}</span>
                     </div>
-                    <div class="log-body">
-                        <div class="data-box">
-                            <div>🟢 Presentes: ${presentes} | ⚪ Ausentes: ${ausentes}</div>
-                            <div style="color: #dc2626;">🚨 Infiltrados: ${totalInfiltrados}</div>
-                            <div style="color: #d97706;">❓ No Registrados: ${totalNoRegistrados}</div>
-                            <hr style="margin: 8px 0; border: 0; border-top: 1px solid var(--borde);">
-                            ${htmlList || "Sin actividad reciente."}
+                    <span class="${badgeClass}">${badgeText}</span>
+                </div>
+                <div class="log-body" style="${estaDesconectada ? 'opacity: 0.55;' : ''}">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px;">
+                        <span><b>Captura:</b> ${idRegistro}</span>
+                        <span><b>Curso:</b> ${cursoRegistro}</span>
+                    </div>
+                    
+                    <div class="data-box">
+                        <div style="font-weight: 600; margin-bottom: 6px;">📊 Conteo Real:</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                            <span>🟢 Presentes: <b>${presentes}</b></span>
+                            <span>⚪ Ausentes: <b>${ausentes}</b></span>
+                            <span style="${totalInfiltrados > 0 ? 'color: #dc2626; font-weight: bold;' : ''}">🚨 Infiltrados: <b>${totalInfiltrados}</b></span>
+                            <span style="${totalNoRegistrados > 0 ? 'color: #d97706; font-weight: bold;' : ''}">❓ No Registrados: <b>${totalNoRegistrados}</b></span>
                         </div>
+                        
+                        <div style="margin-top: 8px; font-weight: 600; border-top: 1px solid var(--borde); padding-top: 6px;">
+                            Lista de Alumnos:
+                        </div>
+                        <div style="max-height: 200px; overflow-y: auto; margin-top: 4px;">
+                            ${listaEstudiantesHTML}
+                        </div>
+                    </div>
+                    <div style="font-size: 10px; color: #64748b; text-align: right; margin-top: 6px;">
+                        📍 Coordenadas: ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}
                     </div>
                 </div>
             `;
 
+            contenedorLogs.innerHTML = `
+                <div id="card-log-${idCamara}" class="log-item">
+                    ${contenidoTarjeta}
+                </div>
+            `;
+
             if (marcadorActual) mapa.removeLayer(marcadorActual);
-            marcadorActual = L.marker([lat, lng], { icon: estaDesconectada ? iconoApagada : iconoPrendida }).addTo(mapa);
+            
+            const iconoSeleccionado = estaDesconectada ? iconoApagada : iconoPrendida;
+
+            marcadorActual = L.marker([lat, lng], { icon: iconoSeleccionado }).addTo(mapa)
+                .bindPopup(`<b>${nombreCamara}</b><br>Estado: ${badgeText}`)
+                .openPopup();
             mapa.setView([lat, lng], 18);
         }
 
